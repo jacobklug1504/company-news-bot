@@ -2,13 +2,15 @@
 News Monitoring Bot
 -------------------
 Scans Google News RSS for Tier 1 companies, classifies articles with Claude,
-ranks the top 15 most valuable for a Mirakl BDR, and sends those as Slack DMs.
+ranks the top 15 most valuable per BDR, and sends those as Slack DMs.
+Each BDR has their own sent history to avoid duplicate notifications.
 """
 
 import os
 import json
 import csv
 import time
+from collections import defaultdict
 import feedparser
 import anthropic
 import requests
@@ -25,14 +27,16 @@ GOOGLE_SHEET_CSV_URL = os.getenv("GOOGLE_SHEET_CSV_URL")
 
 DATA_DIR = os.getenv("DATA_DIR", ".")
 SEEN_ARTICLES_FILE = os.path.join(DATA_DIR, "seen_articles.json")
+SENT_ARTICLES_FILE = os.path.join(DATA_DIR, "sent_articles.json")
 FALLBACK_CSV = "companies.csv"
-SUPERVISOR_SLACK_ID = "U0B6KQE5UMA"  # Always receives a copy of every notification
+SUPERVISOR_SLACK_ID = "U0B6KQE5UMA"
 MAX_ARTICLES_PER_COMPANY = 5
-MAX_DAILY_NOTIFICATIONS = 15
+MAX_NOTIFICATIONS_PER_BDR = 15
 
-# ── Deduplication ─────────────────────────────────────────────────────────────
+# ── Deduplication — classification cache (global) ─────────────────────────────
 
 def load_seen_articles() -> set:
+    """URLs already classified — never re-process."""
     if os.path.exists(SEEN_ARTICLES_FILE):
         with open(SEEN_ARTICLES_FILE, "r", encoding="utf-8") as f:
             return set(json.load(f))
@@ -44,15 +48,28 @@ def save_seen_articles(seen: set) -> None:
         json.dump(sorted(seen), f, indent=2, ensure_ascii=False)
 
 
+# ── Deduplication — sent history (per BDR) ───────────────────────────────────
+
+def load_sent_articles() -> dict:
+    """URLs already sent, keyed by slack_user_id."""
+    if os.path.exists(SENT_ARTICLES_FILE):
+        with open(SENT_ARTICLES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def save_sent_articles(sent: dict) -> None:
+    with open(SENT_ARTICLES_FILE, "w", encoding="utf-8") as f:
+        json.dump(sent, f, indent=2, ensure_ascii=False)
+
+
 # ── Company → Salesperson mapping ─────────────────────────────────────────────
 
 def load_companies_from_csv() -> list:
-    """Fallback CSV — include tier column if present, default to Tier 1."""
     companies = []
     with open(FALLBACK_CSV, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            tier = row.get("tier", "Tier 1").strip()
-            if tier != "Tier 1":
+            if row.get("tier", "Tier 1").strip() != "Tier 1":
                 continue
             companies.append({
                 "company": row["company"].strip(),
@@ -63,10 +80,6 @@ def load_companies_from_csv() -> list:
 
 
 def load_companies_from_sheets() -> list:
-    """
-    Fetch the Google Sheet as CSV.
-    Reads column D (Tier) and keeps only Tier 1 companies.
-    """
     response = requests.get(GOOGLE_SHEET_CSV_URL, timeout=10)
     response.raise_for_status()
 
@@ -78,8 +91,7 @@ def load_companies_from_sheets() -> list:
     for row in reader:
         if not row.get("company", "").strip():
             continue
-        tier = row.get("Tier", "").strip()
-        if tier != "Tier 1":
+        if row.get("Tier", "").strip() != "Tier 1":
             continue
         companies.append({
             "company": row["company"].strip(),
@@ -176,11 +188,11 @@ def classify_article(client: anthropic.Anthropic, company: str, article: dict) -
     return json.loads(raw.strip())
 
 
-# ── Ranking — top 15 for a Mirakl BDR ────────────────────────────────────────
+# ── Ranking — top 15 per BDR ──────────────────────────────────────────────────
 
 RANKING_PROMPT = """You are a sales strategy expert at Mirakl, a B2B and B2C marketplace SaaS vendor.
 
-Here is a list of relevant press articles detected today. \
+Here is a list of relevant press articles detected today for one BDR's portfolio. \
 Select and rank the {max_count} most valuable articles \
 for a BDR (Business Development Representative) at Mirakl, \
 i.e. those representing the best commercial outreach opportunity.
@@ -201,8 +213,8 @@ Reply ONLY in valid JSON:
 
 
 def rank_candidates(client: anthropic.Anthropic, candidates: list) -> list:
-    """Ask Claude to pick and rank the top MAX_DAILY_NOTIFICATIONS candidates for a Mirakl BDR."""
-    if len(candidates) <= MAX_DAILY_NOTIFICATIONS:
+    """Pick and rank top MAX_NOTIFICATIONS_PER_BDR candidates for one BDR."""
+    if len(candidates) <= MAX_NOTIFICATIONS_PER_BDR:
         return candidates
 
     articles_summary = [
@@ -217,7 +229,7 @@ def rank_candidates(client: anthropic.Anthropic, candidates: list) -> list:
     ]
 
     prompt = RANKING_PROMPT.format(
-        max_count=MAX_DAILY_NOTIFICATIONS,
+        max_count=MAX_NOTIFICATIONS_PER_BDR,
         articles_json=json.dumps(articles_summary, ensure_ascii=False, indent=2),
     )
 
@@ -234,8 +246,7 @@ def rank_candidates(client: anthropic.Anthropic, candidates: list) -> list:
             raw = raw[4:]
 
     result = json.loads(raw.strip())
-    top_indices = result["top"][:MAX_DAILY_NOTIFICATIONS]
-    return [candidates[i] for i in top_indices]
+    return [candidates[i] for i in result["top"][:MAX_NOTIFICATIONS_PER_BDR]]
 
 
 # ── Slack notification ────────────────────────────────────────────────────────
@@ -268,7 +279,6 @@ def send_slack_dm(slack_user_id: str, company: str, article: dict, result: dict)
 
     _post_slack_message(slack_user_id, text)
 
-    # Always send a copy to the supervisor, unless they are already the recipient
     if slack_user_id != SUPERVISOR_SLACK_ID:
         _post_slack_message(SUPERVISOR_SLACK_ID, text)
 
@@ -281,10 +291,11 @@ def main():
     print(f"{'='*60}\n")
 
     seen_articles = load_seen_articles()
+    sent_articles = load_sent_articles()
     companies = load_companies()
     claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    # ── Phase 1 : collect all relevant articles ───────────────────────────────
+    # ── Phase 1 : scan and classify all articles ──────────────────────────────
     print("⏳ Phase 1 — Scanning articles...\n")
     candidates = []
 
@@ -332,32 +343,44 @@ def main():
 
             time.sleep(0.3)
 
-    print(f"\n📋 {len(candidates)} relevant article(s) found across all Tier 1 companies.")
+    print(f"\n📋 {len(candidates)} relevant article(s) found.")
 
-    # ── Phase 2 : rank top 15 for Mirakl BDR ─────────────────────────────────
-    if not candidates:
-        print("   Nothing to send today.")
-    else:
-        if len(candidates) > MAX_DAILY_NOTIFICATIONS:
-            print(f"⚡ Phase 2 — Ranking top {MAX_DAILY_NOTIFICATIONS} for Mirakl BDR...")
-            top = rank_candidates(claude, candidates)
-        else:
-            top = candidates
+    # ── Phase 2 : group by BDR, filter already sent, rank top 15 each ─────────
+    by_bdr = defaultdict(list)
+    for c in candidates:
+        by_bdr[c["slack_user_id"]].append(c)
 
-        # ── Phase 3 : send notifications ──────────────────────────────────────
-        print(f"\n📨 Phase 3 — Sending {len(top)} notification(s)...\n")
+    total_sent = 0
+
+    for slack_user_id, bdr_candidates in by_bdr.items():
+        already_sent = set(sent_articles.get(slack_user_id, []))
+        fresh = [c for c in bdr_candidates if c["article"]["url"] not in already_sent]
+
+        if not fresh:
+            print(f"\n👤 {slack_user_id} — nothing new to send.")
+            continue
+
+        print(f"\n⚡ Phase 2 — Ranking top {MAX_NOTIFICATIONS_PER_BDR} for {slack_user_id} ({len(fresh)} candidates)...")
+        top = rank_candidates(claude, fresh)
+
+        print(f"📨 Sending {len(top)} notification(s) to {slack_user_id}...\n")
         for item in top:
             send_slack_dm(
-                item["slack_user_id"],
+                slack_user_id,
                 item["company"],
                 item["article"],
                 item["classification"],
             )
+            # Record as sent for this BDR
+            sent_articles.setdefault(slack_user_id, [])
+            sent_articles[slack_user_id].append(item["article"]["url"])
+            total_sent += 1
 
     save_seen_articles(seen_articles)
+    save_sent_articles(sent_articles)
 
     print(f"\n{'='*60}")
-    print(f"  Done — {min(len(candidates), MAX_DAILY_NOTIFICATIONS)} alert(s) sent.")
+    print(f"  Done — {total_sent} notification(s) sent across all BDRs.")
     print(f"{'='*60}\n")
 
 
