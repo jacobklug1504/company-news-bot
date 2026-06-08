@@ -2,4 +2,4 @@
 startCommand = "python main.py"
 
 [cron]
-schedule = "0 8 * * 1,4"
+schedule = "0 8 * * 1-5"
