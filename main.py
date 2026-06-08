@@ -11,11 +11,11 @@ import json
 import csv
 import time
 from collections import defaultdict
+from datetime import datetime, timezone, timedelta
 import feedparser
 import anthropic
 import requests
 from dotenv import load_dotenv
-from datetime import datetime
 
 # ── Environment ──────────────────────────────────────────────────────────────
 
@@ -119,14 +119,24 @@ def load_companies() -> list:
 
 # ── Google News RSS ───────────────────────────────────────────────────────────
 
+MAX_ARTICLE_AGE_DAYS = 7
+
+
 def fetch_news(company: str) -> list:
     url = (
         f"https://news.google.com/rss/search"
         f"?q={requests.utils.quote(company)}&hl=fr&gl=FR&ceid=FR:fr"
     )
     feed = feedparser.parse(url)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=MAX_ARTICLE_AGE_DAYS)
     articles = []
     for entry in feed.entries[:MAX_ARTICLES_PER_COMPANY]:
+        # Filter out articles older than 7 days
+        published_parsed = entry.get("published_parsed")
+        if published_parsed:
+            pub_date = datetime(*published_parsed[:6], tzinfo=timezone.utc)
+            if pub_date < cutoff:
+                continue
         articles.append({
             "title": entry.get("title", ""),
             "url": entry.get("link", ""),
