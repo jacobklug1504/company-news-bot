@@ -26,6 +26,7 @@ GOOGLE_SHEET_CSV_URL = os.getenv("GOOGLE_SHEET_CSV_URL")
 DATA_DIR = os.getenv("DATA_DIR", ".")
 SEEN_ARTICLES_FILE = os.path.join(DATA_DIR, "seen_articles.json")
 FALLBACK_CSV = "companies.csv"
+SUPERVISOR_SLACK_ID = "U0B6KQE5UMA"  # Always receives a copy of every notification
 MAX_ARTICLES_PER_COMPANY = 5
 MAX_DAILY_NOTIFICATIONS = 15
 
@@ -238,6 +239,23 @@ def rank_candidates(client: anthropic.Anthropic, candidates: list) -> list:
 
 # ── Slack notification ────────────────────────────────────────────────────────
 
+def _post_slack_message(channel: str, text: str) -> None:
+    response = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={
+            "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json={"channel": channel, "text": text},
+        timeout=10,
+    )
+    result_json = response.json()
+    if result_json.get("ok"):
+        print(f"   ✓ DM sent to {channel}")
+    else:
+        print(f"   ⚠ Slack error ({channel}): {result_json.get('error')}")
+
+
 def send_slack_dm(slack_user_id: str, company: str, article: dict, result: dict) -> None:
     text = (
         f"🏢 *{company}* — {result['type_evenement']}\n"
@@ -246,21 +264,11 @@ def send_slack_dm(slack_user_id: str, company: str, article: dict, result: dict)
         f"🔗 <{article['url']}|Read article>"
     )
 
-    response = requests.post(
-        "https://slack.com/api/chat.postMessage",
-        headers={
-            "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
-            "Content-Type": "application/json",
-        },
-        json={"channel": slack_user_id, "text": text},
-        timeout=10,
-    )
+    _post_slack_message(slack_user_id, text)
 
-    result_json = response.json()
-    if result_json.get("ok"):
-        print(f"   ✓ DM sent to {slack_user_id}")
-    else:
-        print(f"   ⚠ Slack error ({slack_user_id}): {result_json.get('error')}")
+    # Always send a copy to the supervisor, unless they are already the recipient
+    if slack_user_id != SUPERVISOR_SLACK_ID:
+        _post_slack_message(SUPERVISOR_SLACK_ID, text)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
