@@ -148,6 +148,7 @@ Reply ONLY in valid JSON, no text before or after:
 {{
   "pertinent": true or false,
   "type_evenement": "event category in English or null",
+  "title_en": "English translation of the article title, or null if not relevant",
   "resume": "2 sentences maximum in English: what is happening and why it matters for a salesperson. null if not relevant"
 }}"""
 
@@ -257,9 +258,10 @@ def _post_slack_message(channel: str, text: str) -> None:
 
 
 def send_slack_dm(slack_user_id: str, company: str, article: dict, result: dict) -> None:
+    title = result.get("title_en") or article["title"]
     text = (
         f"🏢 *{company}* — {result['type_evenement']}\n"
-        f"📰 {article['title']}\n"
+        f"📰 {title}\n"
         f"💡 {result['resume']}\n"
         f"🔗 <{article['url']}|Read article>"
     )
