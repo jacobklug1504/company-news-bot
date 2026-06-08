@@ -70,7 +70,7 @@ def load_companies_from_csv() -> list:
     companies = []
     with open(FALLBACK_CSV, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            if row.get("tier", "Tier 1").strip() != "Tier 1":
+            if row.get("tier", "Tier 1").strip() not in ("Tier 1", "Tier 2"):
                 continue
             companies.append({
                 "company": row["company"].strip(),
@@ -92,7 +92,7 @@ def load_companies_from_sheets() -> list:
     for row in reader:
         if not row.get("company", "").strip():
             continue
-        if row.get("Tier", "").strip() != "Tier 1":
+        if row.get("Tier", "").strip() not in ("Tier 1", "Tier 2"):
             continue
         companies.append({
             "company": row["company"].strip(),
@@ -105,9 +105,9 @@ def load_companies_from_sheets() -> list:
 def load_companies() -> list:
     if GOOGLE_SHEET_CSV_URL:
         try:
-            print("📊 Loading Tier 1 companies from Google Sheets...")
+            print("📊 Loading Tier 1 & Tier 2 companies from Google Sheets...")
             companies = load_companies_from_sheets()
-            print(f"   ✓ {len(companies)} Tier 1 companies loaded")
+            print(f"   ✓ {len(companies)} companies loaded")
             return companies
         except Exception as e:
             print(f"   ⚠ Google Sheets error: {e} — falling back to CSV")
