@@ -125,29 +125,29 @@ def fetch_news(company: str) -> list:
 
 # ── Claude classification ─────────────────────────────────────────────────────
 
-CLASSIFICATION_PROMPT = """Tu es un assistant d'intelligence commerciale B2B. \
-Analyse cet article de presse concernant l'entreprise "{company}".
+CLASSIFICATION_PROMPT = """You are a B2B sales intelligence assistant. \
+Analyze this press article about the company "{company}".
 
-Titre : {title}
-Résumé : {summary}
-Date : {published}
+Title: {title}
+Summary: {summary}
+Date: {published}
 
-Sois TRÈS sélectif. La grande majorité des articles doivent être rejetés (pertinent: false).
-N'envoie une alerte QUE si l'article correspond exactement à l'un de ces trois cas :
+Be VERY selective. The vast majority of articles should be rejected (pertinent: false).
+Only flag an article if it matches exactly one of these three cases:
 
-1. E-COMMERCE : lancement ou refonte majeure d'un site e-commerce, nouvelle stratégie digitale vente en ligne, partenariat e-commerce significatif, acquisition d'une plateforme digitale. Exclure : simple mention du digital, cybersécurité générale, outils internes.
+1. E-COMMERCE: major launch or overhaul of an e-commerce site, new online sales digital strategy, significant e-commerce partnership, acquisition of a digital platform. Exclude: passing mention of digital, general cybersecurity, internal tools.
 
-2. CHANGEMENT TOP MANAGEMENT : nomination ou départ d'un CEO, DG, CFO, COO, Président. Ignorer les directeurs de division ou managers intermédiaires.
+2. TOP MANAGEMENT CHANGE: appointment or departure of a CEO, MD, CFO, COO, President. Ignore division directors or middle managers.
 
-3. ÉVÉNEMENT EXCEPTIONNEL : uniquement si l'information est absolument majeure pour l'avenir de l'entreprise (faillite, acquisition transformationnelle, scandale critique). En cas de doute, rejeter.
+3. EXCEPTIONAL EVENT: only if the information is absolutely critical for the company's future (bankruptcy, transformational acquisition, major scandal). When in doubt, reject.
 
-Tout le reste est non pertinent : résultats financiers classiques, variations boursières, produits lambda, partenariats mineurs, événements sportifs/culturels, etc.
+Everything else is not relevant: standard financial results, stock price movements, minor products, minor partnerships, sports/cultural events, etc.
 
-Réponds UNIQUEMENT en JSON valide, sans texte avant ni après :
+Reply ONLY in valid JSON, no text before or after:
 {{
-  "pertinent": true ou false,
-  "type_evenement": "catégorie de l'événement ou null",
-  "resume": "2 phrases maximum : ce qui se passe et pourquoi c'est important pour un commercial. null si non pertinent"
+  "pertinent": true or false,
+  "type_evenement": "event category in English or null",
+  "resume": "2 sentences maximum in English: what is happening and why it matters for a salesperson. null if not relevant"
 }}"""
 
 
@@ -176,25 +176,25 @@ def classify_article(client: anthropic.Anthropic, company: str, article: dict) -
 
 # ── Ranking — top 15 for a Mirakl BDR ────────────────────────────────────────
 
-RANKING_PROMPT = """Tu es un expert en stratégie commerciale chez Mirakl, éditeur SaaS de marketplace B2B et B2C.
+RANKING_PROMPT = """You are a sales strategy expert at Mirakl, a B2B and B2C marketplace SaaS vendor.
 
-Voici une liste d'articles de presse pertinents détectés aujourd'hui. \
-Tu dois sélectionner et classer les {max_count} articles les plus précieux \
-pour un BDR (Business Development Representative) chez Mirakl, \
-c'est-à-dire ceux qui représentent la meilleure opportunité de prise de contact commerciale.
+Here is a list of relevant press articles detected today. \
+Select and rank the {max_count} most valuable articles \
+for a BDR (Business Development Representative) at Mirakl, \
+i.e. those representing the best commercial outreach opportunity.
 
-Critères de valeur décroissante :
-1. Signal e-commerce fort (lancement marketplace, refonte site, stratégie omnicanal) → opportunité directe Mirakl
-2. Changement de DG/CEO dans un retailer ou une marque → nouvelle direction = fenêtre d'ouverture
-3. Acquisition ou expansion dans le retail digital → budget disponible et ambition de croissance
-4. Événement majeur (restructuration, faillite) → besoin urgent de transformation
+Value criteria (descending):
+1. Strong e-commerce signal (marketplace launch, site overhaul, omnichannel strategy) → direct Mirakl opportunity
+2. CEO/MD change at a retailer or brand → new leadership = opening window
+3. Acquisition or expansion in digital retail → budget available and growth ambition
+4. Major event (restructuring, bankruptcy) → urgent transformation need
 
-Articles disponibles :
+Available articles:
 {articles_json}
 
-Réponds UNIQUEMENT en JSON valide :
+Reply ONLY in valid JSON:
 {{
-  "top": [liste des indices (0-based) des {max_count} meilleurs articles, du plus au moins précieux]
+  "top": [list of (0-based) indices of the {max_count} best articles, from most to least valuable]
 }}"""
 
 
@@ -243,7 +243,7 @@ def send_slack_dm(slack_user_id: str, company: str, article: dict, result: dict)
         f"🏢 *{company}* — {result['type_evenement']}\n"
         f"📰 {article['title']}\n"
         f"💡 {result['resume']}\n"
-        f"🔗 <{article['url']}|Voir l'article>"
+        f"🔗 <{article['url']}|Read article>"
     )
 
     response = requests.post(
