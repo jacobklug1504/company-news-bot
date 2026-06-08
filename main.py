@@ -24,6 +24,7 @@ load_dotenv()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 GOOGLE_SHEET_CSV_URL = os.getenv("GOOGLE_SHEET_CSV_URL")
+BOT_ENABLED = os.getenv("BOT_ENABLED", "true").lower() == "true"
 
 DATA_DIR = os.getenv("DATA_DIR", ".")
 SEEN_ARTICLES_FILE = os.path.join(DATA_DIR, "seen_articles.json")
@@ -31,7 +32,7 @@ SENT_ARTICLES_FILE = os.path.join(DATA_DIR, "sent_articles.json")
 FALLBACK_CSV = "companies.csv"
 SUPERVISOR_SLACK_ID = "U0B6KQE5UMA"
 MAX_ARTICLES_PER_COMPANY = 5
-MAX_NOTIFICATIONS_PER_BDR = 15
+MAX_NOTIFICATIONS_PER_BDR = 5
 
 # ── Deduplication — classification cache (global) ─────────────────────────────
 
@@ -299,6 +300,10 @@ def main():
     print(f"\n{'='*60}")
     print(f"  News Monitoring Bot — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
+
+    if not BOT_ENABLED:
+        print("  BOT_ENABLED=false — exiting without sending notifications.")
+        return
 
     seen_articles = load_seen_articles()
     sent_articles = load_sent_articles()
