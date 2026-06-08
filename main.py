@@ -23,7 +23,8 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 GOOGLE_SHEET_CSV_URL = os.getenv("GOOGLE_SHEET_CSV_URL")
 
-SEEN_ARTICLES_FILE = "seen_articles.json"
+DATA_DIR = os.getenv("DATA_DIR", ".")
+SEEN_ARTICLES_FILE = os.path.join(DATA_DIR, "seen_articles.json")
 FALLBACK_CSV = "companies.csv"
 MAX_ARTICLES_PER_COMPANY = 5
 MAX_DAILY_NOTIFICATIONS = 15
